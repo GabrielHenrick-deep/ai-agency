@@ -1,27 +1,29 @@
-# AI Agent Chat - Luna
+# Agência
 
-Chat web com agentes de IA que têm personalidade própria. Roda localmente com Ollama.
+Chat web com uma **equipe de agentes de IA** — cada um com personalidade, função e visual próprios, como os funcionários de uma agência/empresa de TI. Roda localmente (Ollama) ou com providers em nuvem.
 
-## Personalidade Atual: Luna
+## O que é
 
-- **Ruiva, magra, 23 anos**
-- **Introvertida** - poucas amizades, mas profundas
-- **Fã de Taylor Swift** - conhece todas as eras, easter eggs, letras
-- **Criativa** - escreve poemas, desenha, fotografia analógica
-- **Sarcasmo seco** - humor sutil, referências musicais
-- **Trabalha em livraria indie**
+- **Agentes com personalidade** — cada agente é definido em Markdown (`public/personalities/`) com aparência, traços, interesses e system prompt próprios. O agente padrão é o **Tux**, pinguim sysadmin filósofo do software livre.
+- **Contratação de agentes** — na aba de criação você monta novos agentes do zero: nome, descrição, visual customizado e área de atuação (Desenvolvimento, QA, DevOps, Design, Dados, Segurança, Produto, Suporte).
+- **Chat 1:1** com sessões de conversa separadas por agente, e **@menções** para chamar outro agente da equipe no meio do papo.
+- **Escritório 3D** — os agentes ganham corpo num escritório (three.js) e participam de **reuniões** temáticas, dialogando entre si com memória da reunião anterior.
+- **Modo tarefa** 🛠️ — o agente entrega trabalho de verdade: gera arquivos salvos em `workspace/` e sugere comandos prontos para rodar.
+- **Sync entre dispositivos** — sessões e configurações são persistidas num Postgres (PC ↔ celular); se o banco estiver fora, cai pro `localStorage`.
 
 ## Requisitos
 
 - Node.js 18+
-- [Ollama](https://ollama.ai) instalado e rodando
-- Modelo baixado (ex: `ollama pull llama3.2:3b`)
+- [Ollama](https://ollama.ai) instalado e rodando (se quiser modelos locais; ex.: `ollama pull llama3.2:3b`)
+- Docker (opcional) para o Postgres do sync multi-dispositivo
 
 ## Instalação
 
 ```bash
-# Instalar dependências
 npm install
+
+# (opcional) sobe o Postgres para o sync entre dispositivos
+docker compose up -d
 
 # Desenvolvimento (roda cliente + servidor)
 npm run dev
@@ -32,9 +34,6 @@ npm run dev:server  # Express na porta 3001
 
 # Build para produção
 npm run build
-
-# Preview do build
-npm run preview
 ```
 
 ## Estrutura
@@ -42,29 +41,37 @@ npm run preview
 ```
 ├── public/
 │   └── personalities/
-│       └── luna.md          # Personalidade em markdown
+│       └── tux.md             # Agente padrão (definido em Markdown)
 ├── server/
-│   └── index.ts             # Backend Express (proxy Ollama + API)
+│   ├── index.ts               # Backend Express (proxy Ollama, Zen, providers, /api/state)
+│   ├── db.ts                  # Postgres (sync multi-dispositivo)
+│   ├── providers.ts           # Providers OpenAI-compatible
+│   ├── zen.ts                 # OpenCode Zen
+│   └── opencodeLocal.ts       # OpenCode local (opencode serve)
 ├── src/
-│   ├── components/          # React components
-│   ├── context/             # ChatContext (estado global)
-│   ├── hooks/               # Custom hooks
-│   ├── types/               # TypeScript types
-│   └── utils/               # Utilitários (parser de personalidade)
-├── index.html
+│   ├── components/            # Chat, Sidebar, Escritório 3D, menções…
+│   ├── context/               # ChatContext (estado global)
+│   ├── hooks/                 # Custom hooks (@mentions)
+│   ├── types/                 # TypeScript types
+│   └── utils/                 # Agente, reuniões, modo tarefa, sync…
+├── workspace/                 # Arquivos gerados pelos agentes no modo tarefa
 └── package.json
 ```
 
-## Adicionando Novas Personalidades
+## Adicionando novos agentes
 
-1. Crie um arquivo `.md` em `public/personalities/` seguindo o formato de `luna.md`
+**Pela interface (recomendado):** aba de criação na barra lateral — escolha a área de atuação, nome, descrição e visual.
+
+**Por Markdown:**
+
+1. Crie um arquivo `.md` em `public/personalities/` seguindo o formato de `tux.md`
 2. Adicione o ID no array `knownIds` em `src/utils/personality.ts`
-3. A personalidade aparecerá automaticamente no painel lateral
+3. O agente aparece automaticamente na equipe
 
-## Formato do Markdown da Personalidade
+### Formato do Markdown do agente
 
 ```markdown
-# Nome da Personalidade
+# Personalidade: Nome do Agente
 
 ## Informações Básicas
 - **Nome:** ...
@@ -85,22 +92,21 @@ Instruções diretas para o modelo...
 
 ## Configuração
 
-As configurações são salvas no `localStorage`:
-- Modelo Ollama
-- Temperatura
-- Max tokens
+As configurações são salvas no Postgres (sync) ou no `localStorage` como fallback:
+- Modelo padrão e **modelo por agente**
+- Temperatura e max tokens
 - URL do Ollama
 - Chave da API do OpenCode Zen
 - Providers externos (nome, URL, chave)
-- Personalidade ativa
-- Histórico de conversas
+- Agente ativo e histórico de conversas
+- Visuais customizados dos bonecos do escritório
 
 ## Providers em nuvem (qualquer API OpenAI-compatible)
 
 Em **Ajustes › Providers** você adiciona qualquer API compatível com o formato
 OpenAI (`chat/completions`): OpenRouter, Groq, Together, Mistral, LM Studio etc.
 Os modelos aparecem com o prefixo do provider (ex.: `openrouter/<modelo>`) e
-podem ser escolhidos globalmente ou por persona.
+podem ser escolhidos globalmente ou por agente.
 
 O **OpenRouter** já vem pré-configurado: crie uma chave gratuita em
 [openrouter.ai/keys](https://openrouter.ai/keys), cole no card e clique em
@@ -133,8 +139,8 @@ omitidos da lista.
 1. Crie uma chave em [opencode.ai/zen](https://opencode.ai/zen)
 2. Cole em **Ajustes › OpenCode Zen (API key)**
 3. Clique em **⟳ atualizar** na lista de modelos
-4. Escolha um modelo do grupo **OpenCode Zen** — global ou por persona
-   (aba **Personas**, seletor abaixo de cada card)
+4. Escolha um modelo do grupo **OpenCode Zen** — global ou por agente
+   (aba **Agentes**, seletor abaixo de cada card)
 
 Modelos Zen usam o prefixo `opencode/` (ex.: `opencode/kimi-k3`) e valem para o
 chat e para as reuniões do escritório 3D. Alternativamente à chave na UI, é
