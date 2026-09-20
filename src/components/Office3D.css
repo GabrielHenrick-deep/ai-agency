@@ -1,0 +1,683 @@
+.office-wrap {
+  flex: 1 1 0;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  background: var(--bg-0);
+}
+
+.office-empty {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--muted);
+  font-size: 14px;
+}
+
+.office-canvas {
+  position: relative;
+  flex: 1 1 0;
+  min-height: 220px;
+  overflow: hidden;
+  background: #2b3350;
+}
+
+.office-canvas canvas {
+  display: block;
+  width: 100% !important;
+  height: 100% !important;
+  cursor: grab;
+}
+.office-canvas canvas:active { cursor: grabbing; }
+
+/* ---------- balão de fala ---------- */
+.speech-balloon {
+  position: absolute;
+  left: 0;
+  top: 0;
+  max-width: 250px;
+  background: #fffdf6;
+  color: #1c1c1c;
+  font-size: 13px;
+  line-height: 1.55;
+  padding: 10px 13px;
+  border-radius: 14px;
+  border: 2px solid #1c1c1c;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+  transition: opacity 0.25s;
+  pointer-events: auto;
+  z-index: 5;
+}
+.speech-balloon::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  bottom: -9px;
+  width: 14px;
+  height: 14px;
+  background: #fffdf6;
+  border-right: 2px solid #1c1c1c;
+  border-bottom: 2px solid #1c1c1c;
+  transform: translateX(-50%) rotate(45deg);
+}
+.balloon-text {
+  display: block;
+  max-height: 130px;
+  overflow-y: auto;
+  white-space: pre-wrap;
+  word-wrap: break-word;
+}
+.balloon-thinking {
+  display: inline-flex;
+  gap: 5px;
+  padding: 4px 2px;
+}
+.balloon-thinking i {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #555;
+  animation: balloonBounce 1.2s infinite ease-in-out;
+}
+.balloon-thinking i:nth-child(2) { animation-delay: 0.18s; }
+.balloon-thinking i:nth-child(3) { animation-delay: 0.36s; }
+@keyframes balloonBounce {
+  0%, 60%, 100% { transform: none; opacity: 0.4; }
+  30% { transform: translateY(-5px); opacity: 1; }
+}
+
+.office-hint {
+  position: absolute;
+  left: 50%;
+  bottom: 10px;
+  transform: translateX(-50%);
+  font-size: 11.5px;
+  color: rgba(255, 255, 255, 0.45);
+  background: rgba(0, 0, 0, 0.35);
+  padding: 4px 12px;
+  border-radius: 99px;
+  pointer-events: none;
+  white-space: nowrap;
+}
+
+/* ---------- barra de controle ---------- */
+.office-bar {
+  border-top: 1px solid var(--border);
+  background: var(--bg-0);
+  padding: 10px 14px 14px;
+  padding-bottom: max(14px, env(safe-area-inset-bottom));
+  flex-shrink: 0;
+}
+
+/* ---------- painel da equipe ---------- */
+.agents-toggle {
+  display: flex;
+  position: absolute;
+  left: 12px;
+  top: 12px;
+  z-index: 7;
+  width: 42px;
+  height: 42px;
+  border-radius: 50%;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  background: rgba(20, 24, 34, 0.92);
+  font-size: 19px;
+  cursor: pointer;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.15s;
+}
+.agents-toggle:hover { border-color: rgba(255, 255, 255, 0.5); }
+
+.agents-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.agents-min {
+  border: none;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.5);
+  font-size: 14px;
+  font-weight: 700;
+  cursor: pointer;
+  padding: 2px 8px;
+  border-radius: 6px;
+  line-height: 1;
+}
+.agents-min:hover { background: rgba(255, 255, 255, 0.1); color: #fff; }
+
+.agents-panel {
+  position: absolute;
+  left: 12px;
+  top: 12px;
+  bottom: 44px;
+  width: 252px;
+  z-index: 6;
+  background: rgba(18, 22, 32, 0.93);
+  backdrop-filter: blur(12px);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 14px;
+  padding: 12px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  overflow-y: auto;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.45);
+}
+
+.agents-title {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.5);
+  padding: 0 4px 2px;
+}
+
+.agent-card {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  text-align: left;
+  width: 100%;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid transparent;
+  border-radius: 12px;
+  padding: 10px;
+  cursor: pointer;
+  color: #fff;
+  transition: background 0.15s, border-color 0.15s;
+}
+.agent-card:hover { background: rgba(255, 255, 255, 0.08); }
+.agent-card.active {
+  background: rgba(255, 255, 255, 0.09);
+  border-color: #fff;
+}
+.agent-card-avatar {
+  width: 38px;
+  height: 38px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 18px;
+  font-weight: 700;
+  color: #fff;
+  flex-shrink: 0;
+}
+.agent-card-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.agent-card-top { display: flex; align-items: center; justify-content: space-between; gap: 6px; }
+.agent-card-top b { font-size: 14px; }
+.agent-card-top kbd {
+  font-family: inherit;
+  font-size: 10.5px;
+  color: rgba(255, 255, 255, 0.55);
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  border-radius: 5px;
+  padding: 1px 6px;
+}
+.agent-card-role {
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.65);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.agent-card-model {
+  font-family: ui-monospace, monospace;
+  font-size: 10.5px;
+  color: rgba(255, 255, 255, 0.4);
+  background: rgba(255, 255, 255, 0.06);
+  border-radius: 5px;
+  padding: 1px 6px;
+  align-self: flex-start;
+}
+.agent-card-status { display: flex; align-items: center; gap: 6px; font-size: 11.5px; color: #4ade80; }
+.agent-card-status i {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: currentColor;
+  flex-shrink: 0;
+}
+.agent-card-status.busy { color: #fbbf24; }
+.agent-card-status.busy i { animation: statusPulse 1s infinite; }
+.agent-card-status.speaking { color: #f472b6; }
+.agent-card-status.speaking i { animation: statusPulse 0.7s infinite; }
+@keyframes statusPulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
+.agent-card-prev {
+  font-size: 11.5px;
+  color: rgba(255, 255, 255, 0.45);
+  font-style: italic;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  line-height: 1.45;
+}
+.agents-hint {
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.35);
+  text-align: center;
+  padding-top: 2px;
+}
+
+@media (max-width: 899px) {
+  .agents-panel {
+    transform: translateX(-115%);
+    transition: transform 0.25s ease;
+  }
+  .agents-panel.open { transform: none; }
+  .agent-card-top kbd, .agents-hint { display: none; }
+}
+
+.office-composer {
+  position: relative;
+  display: flex;
+  gap: 8px;
+  max-width: 768px;
+  margin: 0 auto;
+}
+
+.office-input {
+  flex: 1;
+  background: var(--bg-2);
+  border: none;
+  border-radius: 12px;
+  padding: 12px 15px;
+  color: var(--text);
+  font-size: 14.5px;
+  outline: none;
+  min-width: 0;
+}
+.office-input::placeholder { color: var(--muted); }
+.office-input:focus { outline: 1px solid #555; }
+
+.office-send {
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  border: none;
+  background: #fff;
+  color: #000;
+  font-size: 18px;
+  font-weight: 700;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: opacity 0.15s;
+}
+.office-send:hover:not(:disabled) { opacity: 0.85; }
+.office-send:disabled { opacity: 0.25; cursor: not-allowed; }
+
+@media (max-width: 700px) {
+  .office-canvas { min-height: 200px; }
+  .speech-balloon { max-width: 200px; font-size: 12.5px; }
+  .office-input { font-size: 16px; }
+  .office-bar { padding: 8px 10px 12px; padding-bottom: max(12px, env(safe-area-inset-bottom)); }
+  .office-send { width: 40px; height: 40px; }
+  .balloon-text { max-height: 100px; }
+}
+
+/* ---------- modo reunião ---------- */
+.meet-toggle {
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  border: 1px solid var(--border-strong);
+  background: transparent;
+  font-size: 19px;
+  cursor: pointer;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.15s;
+  filter: grayscale(1);
+  opacity: 0.6;
+}
+.meet-toggle:hover { opacity: 1; }
+.meet-toggle.on {
+  filter: none;
+  opacity: 1;
+  border-color: #fbbf24;
+  background: rgba(251, 191, 36, 0.14);
+  box-shadow: 0 0 14px rgba(251, 191, 36, 0.35);
+}
+/* modo tarefa ligado = verde (trabalho de verdade!) */
+.meet-toggle.on.task {
+  border-color: #4ade80;
+  background: rgba(74, 222, 128, 0.14);
+  box-shadow: 0 0 14px rgba(74, 222, 128, 0.35);
+}
+
+/* aviso de arquivos entregues (modo tarefa) */
+.task-note {
+  max-width: 768px;
+  margin: 0 auto 8px;
+  padding: 8px 14px;
+  border-radius: 10px;
+  background: rgba(74, 222, 128, 0.1);
+  border: 1px solid rgba(74, 222, 128, 0.35);
+  color: #86efac;
+  font-size: 12.5px;
+  line-height: 1.45;
+  animation: fadeIn 0.2s ease;
+}
+.office-send.stop { font-size: 15px; }
+.office-send.skip {
+  background: transparent;
+  border: 1px solid var(--border-strong);
+  color: var(--text);
+  font-size: 15px;
+}
+.office-send.skip:hover { background: rgba(255, 255, 255, 0.08); }
+
+.meeting-head-actions { display: flex; gap: 2px; }
+.meeting-topic {
+  padding: 7px 12px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #ffd9a0;
+  background: rgba(255, 217, 160, 0.07);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.meeting-panel {
+  position: absolute;
+  right: 12px;
+  top: 12px;
+  bottom: 44px;
+  width: 300px;
+  max-height: calc(100% - 56px);
+  z-index: 6;
+  background: rgba(18, 22, 32, 0.94);
+  backdrop-filter: blur(12px);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 14px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.45);
+  animation: slideIn 0.25s ease;
+}
+@keyframes slideIn {
+  from { opacity: 0; transform: translateX(16px); }
+  to { opacity: 1; transform: none; }
+}
+.meeting-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 12px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  font-size: 13.5px;
+  color: #fff;
+}
+.meeting-close {
+  border: none;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.55);
+  font-size: 14px;
+  cursor: pointer;
+  padding: 4px 8px;
+  border-radius: 6px;
+}
+.meeting-close:hover { background: rgba(255, 255, 255, 0.1); color: #fff; }
+.meeting-memory {
+  padding: 7px 12px;
+  font-size: 11.5px;
+  color: #a5b4fc;
+  background: rgba(139, 92, 246, 0.12);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.meeting-turns {
+  flex: 1;
+  overflow-y: auto;
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.turn { display: flex; gap: 8px; align-items: flex-start; }
+.turn-avatar {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+  font-weight: 700;
+  color: #fff;
+  flex-shrink: 0;
+}
+.turn-avatar.pulse { background: rgba(251, 191, 36, 0.2); animation: statusPulse 1s infinite; }
+.turn-body { min-width: 0; }
+.turn-body b { font-size: 12.5px; color: #fff; }
+.turn-body p {
+  margin: 2px 0 0;
+  font-size: 12.5px;
+  line-height: 1.55;
+  color: rgba(255, 255, 255, 0.8);
+  white-space: pre-wrap;
+  word-wrap: break-word;
+}
+.turn.speaking .turn-body b { color: #fbbf24; font-weight: 600; }
+.meeting-foot {
+  padding: 8px 12px;
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.4);
+  text-align: center;
+}
+
+/* ---------- histórico de reuniões ---------- */
+.meeting-empty {
+  padding: 22px 12px;
+  font-size: 12.5px;
+  color: rgba(255, 255, 255, 0.5);
+  text-align: center;
+  line-height: 1.5;
+}
+.past-meeting {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  width: 100%;
+  text-align: left;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  border-radius: 10px;
+  padding: 9px 11px;
+  cursor: pointer;
+  color: inherit;
+  font: inherit;
+  transition: all 0.15s;
+}
+.past-meeting:hover {
+  background: rgba(255, 255, 255, 0.1);
+  border-color: rgba(255, 217, 160, 0.45);
+}
+.past-meeting-topic {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: #fff;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.past-meeting-meta {
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.45);
+}
+.meeting-again {
+  margin: 0;
+  padding: 11px 12px;
+  border: none;
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(251, 191, 36, 0.14);
+  color: #fbbf24;
+  font-size: 12.5px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.meeting-again:hover:not(:disabled) { background: rgba(251, 191, 36, 0.24); }
+.meeting-again:disabled { opacity: 0.45; cursor: not-allowed; }
+
+/* ---------- terminal dos agentes ---------- */
+.term-badge {
+  position: absolute;
+  top: -5px;
+  right: -5px;
+  min-width: 17px;
+  height: 17px;
+  border-radius: 9px;
+  background: #fbbf24;
+  color: #1a1a1a;
+  font-size: 10.5px;
+  font-weight: 800;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 4px;
+  box-shadow: 0 0 8px rgba(251, 191, 36, 0.6);
+}
+.terminal-panel {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  bottom: 44px;
+  width: min(520px, calc(100% - 24px));
+  max-height: 52%;
+  z-index: 6;
+  background: rgba(12, 14, 18, 0.96);
+  backdrop-filter: blur(12px);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 14px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5);
+}
+.terminal-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 9px 12px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  font-size: 13px;
+  color: #fff;
+}
+.terminal-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.terminal-empty {
+  padding: 18px 10px;
+  font-size: 12.5px;
+  color: rgba(255, 255, 255, 0.45);
+  text-align: center;
+  line-height: 1.5;
+}
+.term-entry {
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  border-radius: 9px;
+  overflow: hidden;
+  background: rgba(255, 255, 255, 0.03);
+}
+.term-entry.running { border-color: rgba(251, 191, 36, 0.4); }
+.term-entry.done { border-color: rgba(74, 222, 128, 0.35); }
+.term-entry.error { border-color: rgba(248, 113, 113, 0.4); }
+.term-cmd-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 10px;
+}
+.term-cmd {
+  flex: 1;
+  min-width: 0;
+  font-family: ui-monospace, Consolas, monospace;
+  font-size: 12px;
+  color: #a5f3a5;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.term-run {
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  border: 1px solid rgba(74, 222, 128, 0.5);
+  background: rgba(74, 222, 128, 0.12);
+  color: #4ade80;
+  font-size: 11px;
+  cursor: pointer;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.term-run:hover { background: rgba(74, 222, 128, 0.25); }
+.term-fix {
+  color: #fbbf24;
+  border: 1px solid rgba(251, 191, 36, 0.4) !important;
+  border-radius: 6px;
+}
+.term-fix:hover:not(:disabled) { background: rgba(251, 191, 36, 0.15); }
+.term-fix:disabled { opacity: 0.5; cursor: wait; }
+.term-status { font-size: 11px; font-weight: 700; flex-shrink: 0; }
+.term-status.running { color: #fbbf24; }
+.term-status.ok { color: #4ade80; }
+.term-status.err { color: #f87171; }
+.term-out {
+  margin: 0;
+  padding: 8px 10px;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(0, 0, 0, 0.45);
+  font-family: ui-monospace, Consolas, monospace;
+  font-size: 11px;
+  line-height: 1.5;
+  color: rgba(255, 255, 255, 0.8);
+  max-height: 180px;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+@media (max-width: 700px) {
+  .meet-toggle { width: 40px; height: 40px; }
+  .meeting-panel {
+    left: 10px;
+    right: 10px;
+    top: auto;
+    bottom: 40px;
+    width: auto;
+    max-height: 46%;
+  }
+}
+
+@media (max-width: 420px) {
+  .speech-balloon { max-width: 178px; padding: 8px 10px; }
+  .office-hint { display: none; }
+}
+
+@media (max-height: 500px) {
+  .office-canvas { min-height: 160px; }
+  .office-hint { display: none; }
+}

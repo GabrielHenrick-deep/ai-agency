@@ -1,0 +1,9 @@
+{
+  "watch": ["server"],
+  "ext": "ts,json",
+  "exec": "tsx server/index.ts",
+  "env": {
+    "OLLAMA_URL": "http://localhost:11434",
+    "PORT": "3001"
+  }
+}
