@@ -10,6 +10,8 @@ export interface Visual {
   tie: number;
   pants: number;
   accent: string;
+  /** fedora ligada/desligada (padrão: ligada) */
+  hat?: boolean;
 }
 
 /** Visual editável pelo usuário (cores em string CSS, ex.: "#f6cfa8"). */
@@ -19,8 +21,8 @@ export interface CharacterVisual {
   skin: string;
   shirt: string;
   pants: string;
-  /** cor do boné (só usado no personagem "you") */
-  cap?: string;
+  /** fedora ligada/desligada por boneco (padrão: ligada) */
+  hat?: boolean;
 }
 
 export const VISUALS: Record<string, Visual> = {
@@ -31,9 +33,6 @@ export const VISUALS: Record<string, Visual> = {
   // o boneco do USUÁRIO na cena (editável na aba Bonecos)
   you: { kind: 'human', skin: 0xb57748, hair: 0x1f1a16, hairStyle: 'curto', blazer: 0x1f9e9e, shirt: 0xf4f2ea, tie: 0x1f9e9e, pants: 0x2b2f36, accent: '#4ade80' },
 };
-
-/** cor padrão do boné do boneco "Você" */
-export const YOU_CAP_COLOR = 0xd23b3b;
 
 const FALLBACKS: Visual[] = [
   { kind: 'human', skin: 0xf6cfa8, hair: 0x3a2a1c, hairStyle: 'long', blazer: 0x2f9e44, shirt: 0xf7efdd, tie: 0x34d399, pants: 0x2b2f36, accent: '#34d399' },
@@ -65,7 +64,7 @@ export function toHexCss(n: number): string {
 export function visualFor(id: string, charVisuals?: Record<string, CharacterVisual>): Visual {
   const base = VISUALS[id] ?? FALLBACKS[hashId(id) % FALLBACKS.length];
   const ov = charVisuals?.[id];
-  if (!ov) return base;
+  if (!ov) return { ...base, hat: base.hat ?? true };
   return {
     ...base,
     hairStyle: ov.hairStyle,
@@ -73,5 +72,6 @@ export function visualFor(id: string, charVisuals?: Record<string, CharacterVisu
     skin: parseHex(ov.skin, base.skin),
     shirt: parseHex(ov.shirt, base.shirt),
     pants: parseHex(ov.pants, base.pants),
+    hat: ov.hat ?? base.hat ?? true,
   };
 }

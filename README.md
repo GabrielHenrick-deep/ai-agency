@@ -9,6 +9,7 @@ Chat web com uma **equipe de agentes de IA** — cada um com personalidade, fun�
 - **Chat 1:1** com sessões de conversa separadas por agente, e **@menções** para chamar outro agente da equipe no meio do papo.
 - **Escritório 3D** — os agentes ganham corpo num escritório (three.js) e participam de **reuniões** temáticas, dialogando entre si com memória da reunião anterior.
 - **Modo tarefa** 🛠️ — o agente entrega trabalho de verdade: gera arquivos salvos em `workspace/` e sugere comandos prontos para rodar.
+- **Modo equipe** 🤝 — vários agentes trabalham JUNTOS na mesma tarefa (ex.: um no backend, outro no frontend). Você escolhe quem participa e se trabalham **em sequência** (cada um vê o que o anterior entregou) ou **em paralelo** (todos ao mesmo tempo). Arquivos e comandos chegam como no modo tarefa.
 - **Sync entre dispositivos** — sessões e configurações são persistidas num Postgres (PC ↔ celular); se o banco estiver fora, cai pro `localStorage`.
 
 ## Requisitos
@@ -99,7 +100,7 @@ As configurações são salvas no Postgres (sync) ou no `localStorage` como fall
 - Chave da API do OpenCode Zen
 - Providers externos (nome, URL, chave)
 - Agente ativo e histórico de conversas
-- Visuais customizados dos bonecos do escritório
+- Visuais customizados dos bonecos do escritório (estilo chibi; fedora ligável/desligável por boneco — aba Bonecos)
 
 ## Providers em nuvem (qualquer API OpenAI-compatible)
 

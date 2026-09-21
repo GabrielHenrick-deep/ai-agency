@@ -17,8 +17,10 @@ import {
 import { parseMentions } from '../utils/mention';
 import { useMentions } from '../hooks/useMentions';
 import { MentionPopup } from './MentionPopup';
-import { parseHexColor, Visual, visualFor, YOU_CAP_COLOR } from '../utils/visuals';
+import { Personality } from '../types';
+import { Visual, visualFor } from '../utils/visuals';
 import { extractCommands, extractFiles, runCommand, saveFilesToWorkspace, TASK_INSTRUCTION } from '../utils/tasks';
+import { buildWorkMessages, Delivery, stripDeliverables } from '../utils/team';
 import './Office3D.css';
 
 /* ============================== visuais ============================== */
@@ -306,49 +308,35 @@ type Built = {
   refs: Pick<Actor, 'head' | 'torso' | 'foreL' | 'foreR' | 'face' | 'legs'>;
 };
 
-/* rosto minimalista: dois pontinhos de olho + boquinha que abre ao falar */
-function simpleFace(head: THREE.Group): FaceRefs {
-  const eyeM = std(0x1c1c22, 0.35);
-  const eyes: THREE.Object3D[] = [];
-  [-1, 1].forEach(side => {
-    const eye = new THREE.Group();
-    eye.position.set(0.115 * side, 0.03, 0.295);
-    eye.add(mesh(new THREE.SphereGeometry(0.034, 10, 10), eyeM));
-    head.add(eye);
-    eyes.push(eye);
-  });
-  const mouth = new THREE.Group();
-  mouth.position.set(0, -0.1, 0.305);
-  const maw = new THREE.Mesh(new THREE.SphereGeometry(0.038, 10, 10), std(0x5a2420, 0.5));
-  maw.scale.set(1, 0.15, 0.55);
-  mouth.add(maw);
-  head.add(mouth);
-  return { eyes, mouth, maw };
-}
-
-function createHuman(v: Visual, opts?: { cap?: number }): Built {
+/* CHIBI "Kimi k3": cabeção, corpinho curto e fedora.
+   Mantém os pivôs do modelo antigo (quadril y=0.5 com coxa/joelho, ombros,
+   cabeça, olhos/boca) para sentar/andar/digitar/piscar/falar continuarem iguais. */
+function createHuman(v: Visual, opts?: { hat?: boolean }): Built {
   const g = new THREE.Group();
   const skin = std(v.skin, 0.55);
   const shirtM = std(v.shirt, 0.85);
   const hairM = std(v.hair, 0.5);
-  // PERNAS articuladas em 2 segmentos: coxa + canela com o sapato grudado nela
-  // (pivôs no quadril e no joelho — ele dobra as pernas de verdade ao sentar
-  // e balança coxa/canela separado quando caminha). Em pé, a sola toca o chão.
   const pantsM = std(v.pants, 0.9);
-  const shoeM = std(0x1c1c22, 0.55);
+  const tieM = std(v.tie, 0.6);
+  const shoeM = std(0x3b3230, 0.6);
+  const soleM = std(0x241a12, 0.9);
+
+  // PERNAS articuladas (coxa + canela + sapato com sola) —
+  // mesmas alturas do modelo antigo (quadril y=0.5) p/ sentar igual
   const mkLeg = (side: 1 | -1) => {
     const hip = new THREE.Group();
-    hip.position.set(0.12 * side, 0.5, 0);
-    // coxa entra no quadril/toquinho da calça
-    hip.add(mesh(new THREE.CapsuleGeometry(0.085, 0.16, 4, 12), pantsM, 0, -0.11, 0));
+    hip.position.set(0.14 * side, 0.5, 0);
+    hip.add(mesh(new THREE.CapsuleGeometry(0.095, 0.12, 4, 12), pantsM, 0, -0.1, 0));
     const knee = new THREE.Group();
-    knee.position.set(0, -0.22, 0);
-    // canela mais fina que a coxa
-    knee.add(mesh(new THREE.CapsuleGeometry(0.072, 0.14, 4, 12), pantsM, 0, -0.1, 0));
-    // sapato oval encaixado no fim da canela, sola encostando no chão (y = 0)
-    const shoe = mesh(new THREE.SphereGeometry(0.105, 14, 14), shoeM, 0, -0.225, 0.05);
-    shoe.scale.set(0.95, 0.55, 1.4);
+    knee.position.set(0, -0.2, 0);
+    knee.add(mesh(new THREE.CapsuleGeometry(0.078, 0.1, 4, 12), pantsM, 0, -0.085, 0));
+    // sapato marrom com sola escura
+    const shoe = mesh(new THREE.SphereGeometry(0.105, 14, 14), shoeM, 0, -0.205, 0.045);
+    shoe.scale.set(0.95, 0.55, 1.45);
     knee.add(shoe);
+    const sole = mesh(new THREE.SphereGeometry(0.105, 14, 14), soleM, 0, -0.235, 0.05);
+    sole.scale.set(1, 0.28, 1.5);
+    knee.add(sole);
     hip.add(knee);
     g.add(hip);
     return { hip, knee };
@@ -357,72 +345,161 @@ function createHuman(v: Visual, opts?: { cap?: number }): Built {
   const legR = mkLeg(1);
   const legs = { hipL: legL.hip, hipR: legR.hip, kneeL: legL.knee, kneeR: legR.knee };
 
-  // CAMISETA lisa: corpinho em cápsula, sem gravata nem blazer
-  const torso = mesh(new THREE.CapsuleGeometry(0.25, 0.32, 6, 18), shirtM, 0, 0.8, 0);
-  torso.scale.set(1.08, 1, 0.72);
-  g.add(torso);
-  // barriguinha da camiseta caindo sobre a cintura da calça (cintura fina)
-  g.add(mesh(new THREE.CylinderGeometry(0.225, 0.24, 0.1, 18), shirtM, 0, 0.52, 0));
+  // BARRIGUINHA da calça + CINTO com fivela dourada
+  const hips = mesh(new THREE.SphereGeometry(0.3, 20, 16), pantsM, 0, 0.52, 0);
+  hips.scale.set(1.06, 0.7, 0.88);
+  g.add(hips);
+  g.add(mesh(new THREE.CylinderGeometry(0.315, 0.325, 0.08, 20), std(0x3a2b1c, 0.85), 0, 0.62, 0));
+  g.add(mesh(new THREE.BoxGeometry(0.11, 0.055, 0.03), std(0xd8b45a, 0.35, { metalness: 0.6 }), 0, 0.62, 0.305));
 
-  // BRAÇOS caídos (como na folha de referência): ombro-manga + antebraço pele + mãozinha
+  // TRONCO curto e gordinho + botões + golinha
+  const torso = mesh(new THREE.CylinderGeometry(0.33, 0.375, 0.5, 20), shirtM, 0, 0.86, 0);
+  g.add(torso);
+  g.add(mesh(new THREE.SphereGeometry(0.028, 8, 8), std(0xe8ece2, 0.5), 0, 0.75, 0.358));
+  g.add(mesh(new THREE.SphereGeometry(0.028, 8, 8), std(0xe8ece2, 0.5), 0, 0.89, 0.342));
+  const collar = mesh(new THREE.TorusGeometry(0.17, 0.04, 8, 20), shirtM, 0, 1.12, 0);
+  collar.rotation.x = Math.PI / 2;
+  g.add(collar);
+
+  // BRAÇOS curtos com mãozinhas (pivô no ombro p/ as animações)
   const mkArm = (side: 1 | -1) => {
     const shoulder = new THREE.Group();
-    shoulder.position.set(0.27 * side, 1.04, 0);
-    shoulder.add(mesh(new THREE.SphereGeometry(0.085, 12, 12), shirtM, 0, 0.02, 0));
-    shoulder.add(mesh(new THREE.CapsuleGeometry(0.055, 0.2, 4, 10), skin, 0, -0.16, 0));
-    shoulder.add(mesh(new THREE.SphereGeometry(0.075, 12, 12), skin, 0, -0.31, 0));
+    shoulder.position.set(0.4 * side, 1.02, 0);
+    shoulder.add(mesh(new THREE.SphereGeometry(0.085, 12, 12), shirtM, 0, 0, 0));
+    shoulder.add(mesh(new THREE.CapsuleGeometry(0.062, 0.14, 4, 10), shirtM, 0, -0.1, 0));
+    shoulder.add(mesh(new THREE.SphereGeometry(0.095, 12, 12), skin, 0, -0.27, 0));
     g.add(shoulder);
     return shoulder;
   };
   const foreL = mkArm(-1);
   const foreR = mkArm(1);
 
-  // CABEÇÃO liso
+  // CABEÇÃO chibi
   const head = new THREE.Group();
-  head.position.set(0, 1.5, 0);
-  head.add(mesh(new THREE.SphereGeometry(0.33, 28, 28), skin));
-  const face = simpleFace(head);
+  head.position.set(0, 1.34, 0);
+  const skull = mesh(new THREE.SphereGeometry(0.5, 28, 24), skin);
+  skull.scale.set(1, 0.92, 0.95);
+  head.add(skull);
 
   // orelhinhas
   [-1, 1].forEach(side => {
-    const ear = mesh(new THREE.SphereGeometry(0.075, 10, 10), skin, 0.315 * side, -0.01, -0.02);
-    ear.scale.set(0.5, 0.8, 0.8);
+    const ear = mesh(new THREE.SphereGeometry(0.068, 10, 10), skin, 0.485 * side, -0.03, 0);
+    ear.scale.set(0.5, 0.9, 0.8);
     head.add(ear);
   });
 
-  // cabelo-capacete cobrindo topo e nuca + franja volumosa na testa
-  head.add(mesh(new THREE.SphereGeometry(0.35, 26, 26), hairM, 0, 0.09, -0.08));
-  const fringe = mesh(new THREE.SphereGeometry(0.24, 18, 18), hairM, 0, 0.18, 0.16);
-  fringe.scale.set(1.05, 0.5, 0.6);
-  head.add(fringe);
+  // ROSTO: olhos grandes (esclera + pupila + brilho), sobrancelhas, blush, nariz, sorriso
+  const eyes: THREE.Object3D[] = [];
+  const whiteM = std(0xffffff, 0.3);
+  const pupM = std(0x14161c, 0.3);
+  const hlM = new THREE.MeshBasicMaterial({ color: 0xffffff });
+  [-1, 1].forEach(side => {
+    const eye = new THREE.Group();
+    eye.position.set(0.19 * side, 0.03, 0.435);
+    const w = mesh(new THREE.SphereGeometry(0.09, 14, 12), whiteM);
+    w.scale.set(1, 1.45, 0.5);
+    eye.add(w);
+    const pup = mesh(new THREE.SphereGeometry(0.05, 10, 10), pupM, 0, 0.005, 0.05);
+    pup.scale.set(1, 1.3, 0.5);
+    eye.add(pup);
+    const hl = new THREE.Mesh(new THREE.SphereGeometry(0.018, 8, 8), hlM);
+    hl.position.set(0.022, 0.035, 0.075);
+    eye.add(hl);
+    head.add(eye);
+    eyes.push(eye);
+  });
+  [-1, 1].forEach(side => {
+    const brow = mesh(new THREE.BoxGeometry(0.13, 0.028, 0.03), hairM, 0.19 * side, 0.215, 0.45);
+    brow.rotation.z = 0.1 * side;
+    head.add(brow);
+  });
+  [-1, 1].forEach(side => {
+    const blush = mesh(new THREE.SphereGeometry(0.06, 10, 8), std(0xf2a6a6, 0.9), 0.325 * side, -0.1, 0.385);
+    blush.scale.set(1, 0.55, 0.35);
+    head.add(blush);
+  });
+  head.add(mesh(new THREE.SphereGeometry(0.028, 8, 8), skin, 0, -0.03, 0.475));
+  const mouth = new THREE.Group();
+  mouth.position.set(0, -0.15, 0.44);
+  const smile = mesh(new THREE.TorusGeometry(0.095, 0.018, 8, 20, Math.PI), std(0x5a3626, 0.6), 0, 0, 0.012);
+  smile.rotation.z = Math.PI;
+  smile.rotation.x = 0.1;
+  mouth.add(smile);
+  const maw = new THREE.Mesh(new THREE.SphereGeometry(0.055, 12, 10), std(0x5a2420, 0.5));
+  maw.scale.set(1, 0.15, 0.5);
+  mouth.add(maw);
+  head.add(mouth);
+  const face: FaceRefs = { eyes, mouth, maw };
 
+  // CABELO-capacete: fundo e inclinado p/ trás (testa livre, nuca coberta)
+  const hairCap = mesh(
+    new THREE.SphereGeometry(0.535, 28, 20, 0, Math.PI * 2, 0, Math.PI * 0.55),
+    hairM, 0, 0.15, -0.06
+  );
+  hairCap.rotation.x = -0.3;
+  hairCap.scale.set(1, 0.92, 1.06);
+  head.add(hairCap);
+  // volume no topo: quebra a silhueta redondinha do capacete
+  const puff = mesh(new THREE.SphereGeometry(0.3, 18, 14), hairM, 0, 0.42, -0.1);
+  puff.scale.set(1.25, 0.55, 1.05);
+  head.add(puff);
+  // franja em degraus (cai melhor na testa)
+  [[-0.23, 0.27, 0.42, 0.3], [0, 0.31, 0.44, 0], [0.23, 0.27, 0.42, -0.3], [-0.36, 0.22, 0.33, 0.4], [0.36, 0.22, 0.33, -0.4]].forEach(([x, y, z, rz]) => {
+    const bang = mesh(new THREE.SphereGeometry(0.105, 12, 10), hairM, x, y, z);
+    bang.scale.set(1.15, 0.8, 0.65);
+    bang.rotation.z = rz;
+    head.add(bang);
+  });
+  // mechas laterais emoldurando o rosto
+  [-1, 1].forEach(side => {
+    const lock = mesh(new THREE.SphereGeometry(0.085, 12, 10), hairM, 0.42 * side, -0.04, 0.26);
+    lock.scale.set(0.55, 1.7, 0.6);
+    lock.rotation.z = 0.12 * side;
+    head.add(lock);
+  });
   if (v.hairStyle === 'long') {
-    const back = mesh(new THREE.SphereGeometry(0.24, 16, 16), hairM, 0, -0.3, -0.26);
-    back.scale.set(1.1, 1.5, 0.8);
+    const back = mesh(new THREE.SphereGeometry(0.27, 18, 16), hairM, 0, -0.22, -0.3);
+    back.scale.set(1.15, 1.4, 0.72);
     head.add(back);
-    head.add(mesh(new THREE.SphereGeometry(0.1, 12, 12), hairM, -0.27, -0.26, -0.12));
-    head.add(mesh(new THREE.SphereGeometry(0.1, 12, 12), hairM, 0.27, -0.26, -0.12));
+    head.add(mesh(new THREE.SphereGeometry(0.085, 10, 10), hairM, -0.34, -0.3, -0.02));
+    head.add(mesh(new THREE.SphereGeometry(0.085, 10, 10), hairM, 0.34, -0.3, -0.02));
   } else if (v.hairStyle === 'ponytail') {
-    const tail = mesh(new THREE.SphereGeometry(0.12, 14, 14), hairM, 0, -0.12, -0.4);
+    const tail = mesh(new THREE.SphereGeometry(0.095, 12, 12), hairM, 0, -0.1, -0.44);
     tail.scale.set(1, 1.7, 1);
     head.add(tail);
-    head.add(mesh(new THREE.TorusGeometry(0.1, 0.03, 8, 16), std(v.tie, 0.6), 0, 0.1, -0.33));
+    const band = mesh(new THREE.TorusGeometry(0.075, 0.02, 8, 16), tieM, 0, 0.04, -0.38);
+    band.rotation.x = Math.PI / 2 + 0.5;
+    head.add(band);
+  } else {
+    [-1, 1].forEach(side => {
+      const tuft = mesh(new THREE.SphereGeometry(0.14, 12, 10), hairM, 0.45 * side, 0.08, -0.08);
+      tuft.scale.set(0.7, 1.1, 0.9);
+      head.add(tuft);
+    });
   }
-  // boné (pro dono do escritório)
-  if (opts?.cap !== undefined) {
-    const capMat = std(opts.cap, 0.7);
-    head.add(mesh(new THREE.CylinderGeometry(0.3, 0.32, 0.12, 20), capMat, 0, 0.32, -0.02));
-    head.add(mesh(new THREE.SphereGeometry(0.06, 10, 10), capMat, 0, 0.4, -0.02));
-    const brim = mesh(new THREE.BoxGeometry(0.3, 0.045, 0.24), capMat, 0, 0.29, 0.33);
-    brim.rotation.x = -0.08;
-    head.add(brim);
+
+  // FEDORA 🎩 estilo Tux (escuro, copa reta, faixinha escura), assentado no cabelo:
+  // a base da copa (raio ~0.38) encosta na superfície do cabelo, sem flutuar.
+  // Ligado/desligado por boneco (aba Bonecos).
+  if (opts?.hat !== false) {
+    const hatM = std(0x39312a, 0.75);
+    const hatB = std(0x14161c, 0.6);
+    const hat = new THREE.Group();
+    hat.position.set(0.01, 0.5, -0.02);
+    hat.rotation.z = 0.12;
+    hat.rotation.x = -0.08;
+    hat.add(mesh(new THREE.CylinderGeometry(0.58, 0.6, 0.045, 28), hatM));                // aba
+    hat.add(mesh(new THREE.CylinderGeometry(0.3, 0.38, 0.32, 24), hatM, 0, 0.185, 0));   // copa
+    hat.add(mesh(new THREE.CylinderGeometry(0.385, 0.395, 0.07, 24), hatB, 0, 0.055, 0)); // faixinha
+    head.add(hat);
   }
+
   g.add(head);
 
   return { group: g, refs: { head, torso, foreL, foreR, face, legs } };
 }
 
-function createPenguin(_v: Visual): Built {
+function createPenguin(_v: Visual, hat = true): Built {
   const g = new THREE.Group();
   const black = std(0x141419, 0.55);   // preto azulado, leve brilho de pena
   const white = std(0xf6f8fa, 0.65);
@@ -497,16 +574,18 @@ function createPenguin(_v: Visual): Built {
   const face: FaceRefs = { eyes, mouth: beakG, maw: beakG };
 
   // FEDORA 🎩 (aba larga + copa com faixa), levemente inclinado pra ficar estiloso
-  const hat = new THREE.Group();
-  hat.position.set(0.02, 0.27, 0.01);
-  hat.rotation.z = 0.12;
-  hat.rotation.x = -0.08;
-  const hatM = std(0x39312a, 0.75);
-  hat.add(mesh(new THREE.CylinderGeometry(0.29, 0.3, 0.025, 24), hatM, 0, 0, 0)); // aba
-  hat.add(mesh(new THREE.CylinderGeometry(0.155, 0.185, 0.17, 20), hatM, 0, 0.095, 0)); // copa
-  // faixinha da copa
-  hat.add(mesh(new THREE.CylinderGeometry(0.19, 0.195, 0.035, 20), std(0x14161c, 0.6), 0, 0.028, 0));
-  head.add(hat);
+  if (hat) {
+    const hatG = new THREE.Group();
+    hatG.position.set(0.02, 0.27, 0.01);
+    hatG.rotation.z = 0.12;
+    hatG.rotation.x = -0.08;
+    const hatM = std(0x39312a, 0.75);
+    hatG.add(mesh(new THREE.CylinderGeometry(0.29, 0.3, 0.025, 24), hatM, 0, 0, 0)); // aba
+    hatG.add(mesh(new THREE.CylinderGeometry(0.155, 0.185, 0.17, 20), hatM, 0, 0.095, 0)); // copa
+    // faixinha da copa
+    hatG.add(mesh(new THREE.CylinderGeometry(0.19, 0.195, 0.035, 20), std(0x14161c, 0.6), 0, 0.028, 0));
+    head.add(hatG);
+  }
 
   g.add(head);
 
@@ -1261,6 +1340,10 @@ export function Office3D() {
   const [busy, setBusy] = useState(false);
   const [panelOpen, setPanelOpen] = useState(() => typeof window !== 'undefined' && window.innerWidth >= 900);
   const [meetingMode, setMeetingMode] = useState(false);
+  // modo EQUIPE 🤝: vários agentes entregam arquivos juntos (sequencial ou paralelo)
+  const [teamMode, setTeamMode] = useState(false);
+  const [teamIds, setTeamIds] = useState<string[] | null>(null); // null = toda a equipe
+  const [teamParallel, setTeamParallel] = useState(false);       // false = sequencial
   // modo tarefa 🛠️: o agente EXECUTA o pedido e entrega arquivos (salvos em workspace/)
   const [taskMode, setTaskMode] = useState(false);
   const [taskNote, setTaskNote] = useState<string | null>(null);
@@ -1279,6 +1362,7 @@ export function Office3D() {
   const [viewingMeeting, setViewingMeeting] = useState<PastMeeting | null>(null);
   const abortRef = useRef<AbortController | null>(null);
   const turnAbortRef = useRef<AbortController | null>(null);
+  const teamCtrlsRef = useRef<AbortController[]>([]); // modos paralelos: aborta todo mundo
   const transcriptRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   // refs p/ o loop de animação (3D lê o estado React sem recriar a cena)
@@ -1288,7 +1372,7 @@ export function Office3D() {
 
   const agents = state.personalities;
   const idsKey = useMemo(() => agents.map(a => a.id).join(','), [agents]);
-  // re-renderiza a cena quando visuais customizados mudam
+  // re-renderiza a cena quando visuais customizados (cores/estilo/fedora por boneco) mudam
   const visualsKey = useMemo(
     () => JSON.stringify(state.settings.charVisuals),
     [state.settings.charVisuals]
@@ -1422,22 +1506,23 @@ export function Office3D() {
 
     agents.forEach(p => {
       const v = visualFor(p.id, state.settings.charVisuals);
+      const showHat = v.hat !== false; // fedora individual (aba Bonecos)
       const isTux = p.id === 'tux';
       const onA = benchA.includes(p.id);
       const bx = onA ? benchAX : benchBX;
       const mates = onA ? benchA : benchB;
       const seatJ = mates.indexOf(p.id);
-      // Tux fica do lado da mesa do usuário (7.4, 4.4), virado pro mesmo lado
-      const facing = isTux ? -2.35 : onA ? Math.PI / 2 : -Math.PI / 2;
-      const seatX = isTux ? 5.4 : bx + (onA ? -1.05 : 1.05);
-      const seatZ = isTux ? 4.2 : (seatJ - (mates.length - 1) / 2) * 1.9;
+      // Tux fica na recepção, à frente das bancadas (longe da mesa do usuário)
+      const facing = isTux ? Math.PI + 0.25 : onA ? Math.PI / 2 : -Math.PI / 2;
+      const seatX = isTux ? -2.6 : bx + (onA ? -1.05 : 1.05);
+      const seatZ = isTux ? 6.4 : (seatJ - (mates.length - 1) / 2) * 1.9;
 
       // grupo do assento: tudo em coords locais (frente = +z local)
       const seat = new THREE.Group();
       seat.position.set(seatX, 0, seatZ);
       seat.rotation.y = facing;
 
-      const built = v.kind === 'penguin' ? createPenguin(v) : createHuman(v);
+      const built = v.kind === 'penguin' ? createPenguin(v, showHat) : createHuman(v, { hat: showHat });
       const anchor = new THREE.Group();
       // sentado na cadeira: âncora subida até o assento, perninhas encolhem (anim loop)
       anchor.position.set(0, v.kind === 'penguin' ? 0.12 : 0.2, -0.3);
@@ -1483,7 +1568,7 @@ export function Office3D() {
       ring.position.set(0, 0.03, 0);
       anchor.add(ring);
       const tag = createNameTag(p.name, v.accent);
-      tag.position.set(0, 2.3, 0);
+      tag.position.set(0, v.kind === 'penguin' ? 2.3 : (showHat ? 2.6 : 2.35), 0);
       anchor.add(tag);
       // canequinha que ele carrega na pausa pro café
       const carriedMug = mesh(
@@ -1532,10 +1617,8 @@ export function Office3D() {
 
     // SEU bonequinho (digita junto, mas não é selecionável; personalizável na aba Bonecos)
     {
-      const youSaved = state.settings.charVisuals['you'];
       const you = visualFor('you', state.settings.charVisuals);
-      const capColor = youSaved?.cap ? parseHexColor(youSaved.cap, YOU_CAP_COLOR) : YOU_CAP_COLOR;
-      const built = createHuman(you, { cap: capColor });
+      const built = createHuman(you, { hat: you.hat !== false });
       const seat = new THREE.Group();
       // canto da frente-direita, LONGE da rota do café ☕ (que passa por x≈3.9–5.0)
       seat.position.set(7.4, 0, 4.4);
@@ -1563,7 +1646,7 @@ export function Office3D() {
       plate.position.set(0, 1.28, 1.31);
       seat.add(plate);
       const tag = createNameTag('Você', '#4ade80');
-      tag.position.set(0, 2.3, 0);
+      tag.position.set(0, you.hat !== false ? 2.6 : 2.35, 0);
       anchor.add(tag);
       seat.add(createCubicle());
       scene.add(seat);
@@ -2124,7 +2207,120 @@ export function Office3D() {
   const stopMeeting = useCallback(() => {
     abortRef.current?.abort();
     turnAbortRef.current?.abort();
+    teamCtrlsRef.current.forEach(c => c.abort());
+    teamCtrlsRef.current = [];
   }, []);
+
+  /**
+   * MODO EQUIPE 🤝: uma tarefa distribuída entre vários agentes.
+   * - SEQUENCIAL: cada um vê os arquivos/resumo de quem trabalhou antes
+   *   (ex.: backend entrega a API → frontend consome na sequência).
+   * - PARALELO: todos ao mesmo tempo, cada um na sua especialidade.
+   * Arquivos vão pra workspace/ e comandos pra fila do terminal (igual modo tarefa).
+   */
+  const runTeamTask = useCallback(async (task: string) => {
+    if (meetingRunning || busy) return;
+    const members = agents.filter(a => teamIds === null || teamIds.includes(a.id));
+    if (members.length === 0) {
+      setTaskNote('⚠️ selecione pelo menos 1 agente pra trabalhar em equipe');
+      return;
+    }
+    const ctrl = new AbortController();
+    abortRef.current = ctrl;
+    teamCtrlsRef.current = [];
+    setHistoryOpen(false);
+    setViewingMeeting(null);
+    setMeetingTurns([]);
+    setMeetingTopic(`🤝 ${task}`);
+    setPastTopic(null);
+    setMeetingRunning(true);
+    setTaskNote(teamParallel ? '⚡ equipe trabalhando em PARALELO…' : '🔗 equipe trabalhando em SEQUÊNCIA…');
+
+    const history: { agentId: string; name: string; text: string }[] = [];
+    const deliveries: Delivery[] = [];
+    // entregas completas (com trechos de conteúdo) p/ o próximo da fila ver
+    const cloud = { zenApiKey: state.settings.zenApiKey, providers: state.settings.providers };
+
+    const workOne = async (a: Personality, prior: Delivery[]): Promise<Delivery | null> => {
+      setMeetingSpeaker(a.id); // boneco "fala"/trabalha no 3D
+      const mates = members
+        .filter(m => m.id !== a.id)
+        .map(m => ({ name: m.name, role: ROLE_MAP[m.id] ?? m.description }));
+      const msgs = buildWorkMessages(a, mates, task, prior, teamParallel);
+      const tCtrl = new AbortController();
+      turnAbortRef.current = tCtrl;
+      teamCtrlsRef.current.push(tCtrl);
+      let text = '';
+      try {
+        text = await fetchTurn(
+          getModelFor(state.settings, a.id),
+          msgs,
+          { temperature: state.settings.temperature, num_predict: state.settings.maxTokens },
+          tCtrl.signal,
+          cloud
+        );
+      } catch {
+        if (ctrl.signal.aborted) return null;
+        text = '';
+      }
+      if (ctrl.signal.aborted) return null;
+      if (!text) text = '…(voltei vazio — aumenta o Max tokens em Ajustes e tenta de novo)…';
+
+      // mesma canalização do modo tarefa: arquivos → workspace/, comandos → fila do terminal
+      const files = extractFiles(text);
+      const saved = files.length > 0 ? await saveFilesToWorkspace(files) : [];
+      const cmds = extractCommands(text);
+      if (cmds.length > 0) {
+        setTermLog(prev => [
+          ...prev,
+          ...cmds.map((cmd, i) => ({ id: `team-${Date.now()}-${a.id}-${i}`, cmd, status: 'pending' as const })),
+        ]);
+        setTermOpen(true);
+      }
+
+      const summary = stripDeliverables(text).slice(0, 600);
+      const delivery: Delivery = { name: a.name, files: saved, summary };
+      const report =
+        (saved.length > 0
+          ? `📦 ${saved.length} arquivo(s): ${saved.slice(0, 5).join(', ')}${saved.length > 5 ? '…' : ''}`
+          : '🔎 sem arquivos novos') +
+        (summary ? `\n${summary}` : '');
+      history.push({ agentId: a.id, name: a.name, text: report });
+      setMeetingTurns([...history]);
+      return delivery;
+    };
+
+    try {
+      if (teamParallel) {
+        // todo mundo AO MESMO TEMPO: quem terminar primeiro aparece primeiro na ata
+        const results: (Delivery | null)[] = [];
+        await Promise.all(members.map(async a => {
+          const d = await workOne(a, []);
+          results.push(d);
+        }));
+        results.forEach(d => { if (d) deliveries.push(d); });
+      } else {
+        for (const a of members) {
+          if (ctrl.signal.aborted) break;
+          const d = await workOne(a, deliveries);
+          if (d) deliveries.push(d);
+        }
+      }
+      if (!ctrl.signal.aborted) {
+        const total = deliveries.reduce((n, d) => n + d.files.length, 0);
+        setTaskNote(total > 0
+          ? `🤝 equipe entregou ${total} arquivo(s) em workspace/ — confira no terminal se há comandos pra rodar`
+          : '🤝 equipe concluiu (nenhum arquivo novo — os agentes podem ter só discutido)');
+        if (history.length > 0) await saveMeeting(`🤝 ${task}`, history);
+      }
+    } finally {
+      setMeetingRunning(false);
+      setMeetingSpeaker(null);
+      turnAbortRef.current = null;
+      teamCtrlsRef.current = [];
+      abortRef.current = null;
+    }
+  }, [agents, busy, meetingRunning, teamIds, teamParallel, state.settings]);
 
   const skipTurn = useCallback(() => {
     turnAbortRef.current?.abort();
@@ -2220,6 +2416,11 @@ export function Office3D() {
   const send = useCallback(async () => {
     const text = input.trim();
     if (!text || busy || meetingRunning || !selected) return;
+    if (teamMode) {
+      setInput('');
+      runTeamTask(text);
+      return;
+    }
     if (meetingMode) {
       setInput('');
       runMeeting(text);
@@ -2255,7 +2456,7 @@ export function Office3D() {
     } finally {
       setBusy(false);
     }
-  }, [input, busy, meetingRunning, meetingMode, taskMode, selected, state.currentSession, streamMessage, runMeeting]);
+  }, [input, busy, meetingRunning, meetingMode, taskMode, teamMode, selected, state.currentSession, streamMessage, runMeeting, runTeamTask]);
 
   if (agents.length === 0) {
     return <div className="office-empty">Nenhum agente carregado.</div>;
@@ -2349,7 +2550,7 @@ export function Office3D() {
           <aside className="meeting-panel" aria-label="Reuniões">
             <div className="meeting-head">
               <b>
-                {viewingMeeting ? '📜 Ata antiga' : historyOpen ? '📜 Reuniões anteriores' : '🎙️ Ata da reunião'}
+                {viewingMeeting ? '📜 Ata antiga' : historyOpen ? '📜 Reuniões anteriores' : teamMode ? '🤝 Trabalho em equipe' : '🎙️ Ata da reunião'}
               </b>
               <div className="meeting-head-actions">
                 {meetingRunning && !viewingMeeting && !historyOpen && (
@@ -2477,9 +2678,9 @@ export function Office3D() {
                   })}
                   {meetingRunning && (
                     <div className="turn speaking">
-                      <span className="turn-avatar pulse">🎙️</span>
+                      <span className="turn-avatar pulse">{teamMode ? '🤝' : '🎙️'}</span>
                       <div className="turn-body">
-                        <b>{agents.find(a => a.id === meetingSpeaker)?.name ?? '…'} está falando…</b>
+                        <b>{agents.find(a => a.id === meetingSpeaker)?.name ?? '…'} {teamMode ? 'está trabalhando…' : 'está falando…'}</b>
                       </div>
                     </div>
                   )}
@@ -2568,6 +2769,46 @@ export function Office3D() {
 
       <div className="office-bar">
         {taskNote && <div className="task-note">{taskNote}</div>}
+        {teamMode && (
+          <div className="team-bar" aria-label="Configuração da equipe">
+            <span className="team-bar-label">Quem trabalha:</span>
+            {agents.map(a => {
+              const on = teamIds === null || teamIds.includes(a.id);
+              return (
+                <button
+                  key={a.id}
+                  type="button"
+                  className={`team-chip ${on ? 'on' : ''}`}
+                  onClick={() => {
+                    setTeamIds(prev => {
+                      const all = agents.map(x => x.id);
+                      const cur = prev ?? all;
+                      const next = cur.includes(a.id) ? cur.filter(x => x !== a.id) : [...cur, a.id];
+                      // marcou todo mundo ou desmarcou todo mundo → volta pro "todos"
+                      return next.length === agents.length || next.length === 0 ? null : next;
+                    });
+                  }}
+                  title={on ? `Tirar ${a.name} da tarefa` : `Colocar ${a.name} na tarefa`}
+                >
+                  <span className="team-chip-avatar" style={{ background: avatarGradient(a.id) }}>
+                    {avatarEmoji(a.id, a.name)}
+                  </span>
+                  {a.name}
+                </button>
+              );
+            })}
+            <button
+              type="button"
+              className="team-mode"
+              onClick={() => setTeamParallel(v => !v)}
+              title={teamParallel
+                ? 'PARALELO: todos trabalham ao mesmo tempo (cada um na sua área)'
+                : 'SEQUENCIAL: um por vez — cada um vê o trabalho de quem veio antes'}
+            >
+              {teamParallel ? '⚡ paralelo' : '🔗 sequencial'}
+            </button>
+          </div>
+        )}
         <form
           className="office-composer"
           onSubmit={e => { e.preventDefault(); mentions.close(); send(); }}
@@ -2584,7 +2825,7 @@ export function Office3D() {
             className={`meet-toggle ${taskMode ? 'on task' : ''}`}
             onClick={() => {
               setTaskMode(v => !v);
-              if (!taskMode) setMeetingMode(false);
+              if (!taskMode) { setMeetingMode(false); setTeamMode(false); }
             }}
             title="Modo tarefa: o agente EXECUTA de verdade e entrega arquivos (salvos em workspace/)"
             aria-label="Alternar modo tarefa"
@@ -2597,13 +2838,26 @@ export function Office3D() {
             className={`meet-toggle ${meetingMode ? 'on' : ''}`}
             onClick={() => {
               setMeetingMode(v => !v);
-              if (!meetingMode) setTaskMode(false);
+              if (!meetingMode) { setTaskMode(false); setTeamMode(false); }
             }}
             title="Modo reunião: os agentes conversam entre si"
             aria-label="Alternar modo reunião"
             aria-pressed={meetingMode}
           >
             🎙️
+          </button>
+          <button
+            type="button"
+            className={`meet-toggle ${teamMode ? 'on team' : ''}`}
+            onClick={() => {
+              setTeamMode(v => !v);
+              if (!teamMode) { setMeetingMode(false); setTaskMode(false); }
+            }}
+            title="Modo equipe: os agentes TRABALHAM JUNTOS numa tarefa (ex.: um no backend, outro no frontend)"
+            aria-label="Alternar modo equipe"
+            aria-pressed={teamMode}
+          >
+            🤝
           </button>
           <button
             type="button"
@@ -2646,11 +2900,13 @@ export function Office3D() {
               if (e.key === 'Escape' && pop) mentions.close();
             }}
             placeholder={
-              meetingMode
-                ? 'Tema da reunião… (@ chama alguém primeiro)'
-                : taskMode
-                  ? `Pedir tarefa pra ${selected?.name ?? '…'}… (ex.: cria uma landing page de cafeteria)`
-                  : (selected ? `Falar com ${selected.name}… (@ menciona)` : 'Escolha um agente…')
+              teamMode
+                ? 'Tarefa pra equipe… (ex.: cria um app de receitas: um no backend, outro no frontend)'
+                : meetingMode
+                  ? 'Tema da reunião… (@ chama alguém primeiro)'
+                  : taskMode
+                    ? `Pedir tarefa pra ${selected?.name ?? '…'}… (ex.: cria uma landing page de cafeteria)`
+                    : (selected ? `Falar com ${selected.name}… (@ menciona)` : 'Escolha um agente…')
             }
             disabled={busy || meetingRunning || !selected}
             className="office-input"

@@ -203,9 +203,7 @@ export function Sidebar({ isOpen, onClose }: SidebarProps) {
   /** visual atual (customizado ou padrão) de uma persona, no formato do editor */
   const draftFromPersona = (id: string): CharacterVisual => {
     const saved = state.settings.charVisuals[id];
-    if (saved) {
-      return id === 'you' ? { ...saved, cap: saved.cap ?? '#d23b3b' } : saved;
-    }
+    if (saved) return saved;
     const v = visualFor(id);
     const base: CharacterVisual = {
       hairStyle: v.hairStyle,
@@ -213,10 +211,18 @@ export function Sidebar({ isOpen, onClose }: SidebarProps) {
       skin: toHexCss(v.skin),
       shirt: toHexCss(v.shirt),
       pants: toHexCss(v.pants),
+      hat: v.hat !== false,
     };
-    // o SEU boneco usa boné (cor editável)
-    if (id === 'you') base.cap = '#d23b3b';
     return base;
+  };
+
+  /** liga/desliga a fedora de UM boneco (atualiza na hora, sem abrir o editor) */
+  const toggleHat = (id: string) => {
+    const cur = draftFromPersona(id);
+    dispatch({
+      type: 'SET_SETTINGS',
+      payload: { charVisuals: { ...state.settings.charVisuals, [id]: { ...cur, hat: !cur.hat } } },
+    });
   };
 
   const saveVisual = () => {
@@ -243,6 +249,7 @@ export function Sidebar({ isOpen, onClose }: SidebarProps) {
     skin: '#f6cfa8',
     shirt: '#f4f4f6',
     pants: '#2b2f36',
+    hat: true,
   };
 
   const createCharacter = async () => {
@@ -297,8 +304,7 @@ export function Sidebar({ isOpen, onClose }: SidebarProps) {
   /** campos do editor de visual (recomendado por criação/edição) */
   const renderVisualForm = (
     value: CharacterVisual,
-    onChange: (v: CharacterVisual) => void,
-    opts?: { showCap?: boolean }
+    onChange: (v: CharacterVisual) => void
   ) => (
     <div className="char-form">
       <label>
@@ -329,16 +335,14 @@ export function Sidebar({ isOpen, onClose }: SidebarProps) {
         Calça
         <input type="color" value={value.pants} onChange={e => onChange({ ...value, pants: e.target.value })} />
       </label>
-      {opts?.showCap && (
-        <label>
-          Boné
-          <input
-            type="color"
-            value={value.cap ?? '#d23b3b'}
-            onChange={e => onChange({ ...value, cap: e.target.value })}
-          />
-        </label>
-      )}
+      <label style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+        <input
+          type="checkbox"
+          checked={value.hat !== false}
+          onChange={e => onChange({ ...value, hat: e.target.checked })}
+        />
+        Usar fedora 🎩
+      </label>
     </div>
   );
 
@@ -518,9 +522,10 @@ export function Sidebar({ isOpen, onClose }: SidebarProps) {
             <div className="char-list">
               <p className="tip" style={{ marginTop: 0 }}>
                 Aparência 3D dos bonecos no escritório. Cada mudança atualiza a cena na hora.
+                O chapéu (fedora 🎩) pode ser ligado/desligado por boneco.
               </p>
 
-              {/* o SEU boneco também é personalizável (com boné!) */}
+              {/* o SEU boneco também é personalizável (com fedora!) */}
               {(() => {
                 const editingYou = editVisualId === 'you';
                 return (
@@ -529,8 +534,15 @@ export function Sidebar({ isOpen, onClose }: SidebarProps) {
                       <div className="pavatar" style={{ background: avatarGradient('you') }}>🧑</div>
                       <div className="pinfo">
                         <div className="pname">Você</div>
-                        <div className="pdesc">Seu boneco no escritório (o de boné)</div>
+                        <div className="pdesc">Seu boneco no escritório (o de fedora)</div>
                       </div>
+                      <button
+                        className="mini static"
+                        title={visualFor('you', state.settings.charVisuals).hat !== false ? 'Tirar a fedora' : 'Colocar a fedora'}
+                        onClick={() => toggleHat('you')}
+                      >
+                        {visualFor('you', state.settings.charVisuals).hat !== false ? '🎩' : '🧢'}
+                      </button>
                       <button
                         className="mini static"
                         title={editingYou ? 'Fechar editor' : 'Editar visual'}
@@ -549,7 +561,7 @@ export function Sidebar({ isOpen, onClose }: SidebarProps) {
                     </div>
                     {editingYou && draft && (
                       <>
-                        {renderVisualForm(draft, setDraft, { showCap: true })}
+                        {renderVisualForm(draft, setDraft)}
                         <div className="char-actions">
                           <button className="mini static" onClick={saveVisual}>✔ aplicar</button>
                           <button className="mini" onClick={() => resetVisual('you')} title="Volta ao visual padrão">
@@ -574,6 +586,13 @@ export function Sidebar({ isOpen, onClose }: SidebarProps) {
                       <div className="pinfo">
                         <div className="pname">{p.name}</div>
                       </div>
+                      <button
+                        className="mini static"
+                        title={visualFor(p.id, state.settings.charVisuals).hat !== false ? 'Tirar a fedora' : 'Colocar a fedora'}
+                        onClick={() => toggleHat(p.id)}
+                      >
+                        {visualFor(p.id, state.settings.charVisuals).hat !== false ? '🎩' : '🧢'}
+                      </button>
                       {!isPenguin && (
                         <button
                           className="mini static"
