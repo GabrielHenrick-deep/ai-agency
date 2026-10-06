@@ -12,6 +12,7 @@ node_modules
 dist
 dist-ssr
 *.local
+.env
 
 # arquivos gerados pelos agentes no modo tarefa
 workspace

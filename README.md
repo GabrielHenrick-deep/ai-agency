@@ -8,7 +8,7 @@ Chat web com uma **equipe de agentes de IA** — cada um com personalidade, fun�
 - **Contratação de agentes** — na aba de criação você monta novos agentes do zero: nome, descrição, visual customizado e área de atuação (Desenvolvimento, QA, DevOps, Design, Dados, Segurança, Produto, Suporte).
 - **Chat 1:1** com sessões de conversa separadas por agente, e **@menções** para chamar outro agente da equipe no meio do papo.
 - **Escritório 3D** — os agentes ganham corpo num escritório (three.js) e participam de **reuniões** temáticas, dialogando entre si com memória da reunião anterior.
-- **Modo tarefa** 🛠️ — o agente entrega trabalho de verdade: gera arquivos salvos em `workspace/` e sugere comandos prontos para rodar.
+- **Modo tarefa** 🛠️ — o agente entrega trabalho de verdade: gera arquivos salvos numa pasta de projeto dentro dos seus **Documentos** (`Documentos\nome-do-projeto\`) e sugere comandos prontos que rodam já dentro dela.
 - **Modo equipe** 🤝 — vários agentes trabalham JUNTOS na mesma tarefa (ex.: um no backend, outro no frontend). Você escolhe quem participa e se trabalham **em sequência** (cada um vê o que o anterior entregou) ou **em paralelo** (todos ao mesmo tempo). Arquivos e comandos chegam como no modo tarefa.
 - **Sync entre dispositivos** — sessões e configurações são persistidas num Postgres (PC ↔ celular); se o banco estiver fora, cai pro `localStorage`.
 
@@ -55,9 +55,13 @@ npm run build
 │   ├── hooks/                 # Custom hooks (@mentions)
 │   ├── types/                 # TypeScript types
 │   └── utils/                 # Agente, reuniões, modo tarefa, sync…
-├── workspace/                 # Arquivos gerados pelos agentes no modo tarefa
 └── package.json
 ```
+
+> Os arquivos entregues pelos agentes (modo tarefa/equipe) vão para a pasta
+> **Documentos** do usuário, uma pasta por projeto: `Documentos\nome-do-projeto\`,
+> e os comandos sugeridos rodam dentro dela. Dá pra trocar a raiz com a variável
+> `DELIVERIES_DIR` no servidor.
 
 ## Adicionando novos agentes
 
@@ -148,6 +152,26 @@ chat e para as reuniões do escritório 3D. Alternativamente à chave na UI, é
 possível exportar `OPENCODE_API_KEY` no servidor.
 
 ## Deploy
+
+### Docker (tudo containerizado — app + Postgres)
+
+```bash
+docker compose up -d --build
+```
+
+Sobe a app em http://localhost:3001 e o Postgres na mesma rede. O backend fala
+com o **Ollama do PC** via `host.docker.internal` (deixe o Ollama rodando
+normalmente fora do Docker). No Docker, as entregas dos agentes ficam na pasta
+Documentos de dentro do container; rodando localmente, vão para a pasta
+Documentos do usuário. Para passar a chave do Zen pelo
+servidor, copie `.env.example` para `.env` e preencha `OPENCODE_API_KEY`.
+
+```bash
+docker compose logs -f app   # acompanhar logs
+docker compose down          # parar tudo
+```
+
+### Sem Docker
 
 ```bash
 npm run build

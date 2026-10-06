@@ -3,6 +3,8 @@ import cors from 'cors';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
 import { mkdir, writeFile } from 'fs/promises';
+import { existsSync } from 'fs';
+import { homedir } from 'os';
 import { exec } from 'child_process';
 import { initDb, pool } from './db.js';
 import {
@@ -376,7 +378,44 @@ app.get('/api/meetings/:id', async (req, res) => {
   }
 });
 
-/* ---------- workspace: arquivos entregues pelos agentes (modo tarefa 🛠️) ---------- */
+/* ---------- entregas: arquivos dos agentes vão para Documentos\<projeto>\ ----------
+   Cada projeto ganha uma pasta própria dentro da pasta Documentos do usuário
+   (ex.: Documentos\meu-app\) e os comandos rodam dentro dela — o projeto
+   já "começa" lá. Dá pra forçar outra raiz com DELIVERIES_DIR no ambiente. */
+
+/** Pasta Documentos do usuário (com fallbacks para OneDrive), sem dependência de SO específica. */
+function documentsDir(): string {
+  if (process.env.DELIVERIES_DIR) return process.env.DELIVERIES_DIR;
+  const home = homedir();
+  for (const cand of [
+    join(home, 'Documents'),
+    join(home, 'OneDrive', 'Documents'),
+    join(home, 'OneDrive', 'Documentos'),
+  ]) {
+    if (existsSync(cand)) return cand;
+  }
+  return join(home, 'Documents'); // criada no salvamento, se ainda não existir
+}
+
+/** Nome de pasta de projeto seguro: slug simples, sem "..", sem separadores de caminho. */
+function safeProjectName(p: unknown): string | null {
+  if (typeof p !== 'string') return null;
+  const slug = p
+    .normalize('NFD')
+    .replace(/[̀-ͯ]/g, '') // remove acentos combinantes (U+0300–U+036F)
+    .toLowerCase()
+    .replace(/[^a-z0-9-_]+/g, '-')
+    .replace(/-{2,}/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 60);
+  return slug || null;
+}
+
+/** Pasta da entrega: Documentos\<projeto> (default: 'projeto'). */
+function deliveryRoot(project: unknown): { root: string; slug: string } {
+  const slug = safeProjectName(project) ?? 'projeto';
+  return { root: join(documentsDir(), slug), slug };
+}
 
 /** Caminho relativo seguro: sem "..", sem raiz absoluta, sem unidade C:. */
 function safeRelPath(p: unknown): string | null {
@@ -396,14 +435,14 @@ function safeRelPath(p: unknown): string | null {
   return clean;
 }
 
-app.post('/api/workspace/save', async (req, res) => {
+app.post('/api/deliveries/save', async (req, res) => {
   try {
-    const { files } = req.body as { files?: { path: string; content: string }[] };
+    const { files, project } = req.body as { files?: { path: string; content: string }[]; project?: string };
     if (!Array.isArray(files) || files.length === 0) {
       res.status(400).json({ error: 'files (array) é obrigatório' });
       return;
     }
-    const root = join(process.cwd(), 'workspace');
+    const { root, slug } = deliveryRoot(project);
     const saved: string[] = [];
     for (const f of files.slice(0, 30)) {
       const rel = safeRelPath(f?.path);
@@ -413,23 +452,23 @@ app.post('/api/workspace/save', async (req, res) => {
       await writeFile(dest, f.content, 'utf-8');
       saved.push(rel);
     }
-    res.json({ saved });
+    res.json({ saved, project: slug, dir: root });
   } catch (error: any) {
-    console.error('Workspace save error:', error);
+    console.error('Delivery save error:', error);
     res.status(500).json({ error: 'Falha ao salvar arquivos', details: error.message });
   }
 });
 
 /**
- * Executa um comando do agente DENTRO de workspace/ e devolve a saída.
- * Travas: timeout de 90s, buffer limitado, e uma blocklist de comandos
- * destrutivos óbvios (o resto é responsabilidade de quem aperta ▶).
+ * Executa um comando do agente DENTRO da pasta do projeto (Documentos\<projeto>)
+ * e devolve a saída. Travas: timeout de 90s, buffer limitado, e uma blocklist
+ * de comandos destrutivos óbvios (o resto é responsabilidade de quem aperta ▶).
  */
 const BLOCKED_CMD =
   /\b(mkfs|shutdown|reboot|poweroff)\b|del\s+\/[fsq]|erase\s+\/[fsq]|rd\s+\/[sq]|rmdir\s+\/[sq]|format\s+[a-z]:/i;
 
-app.post('/api/workspace/exec', (req, res) => {
-  const { command } = req.body as { command?: string };
+app.post('/api/deliveries/exec', async (req, res) => {
+  const { command, project } = req.body as { command?: string; project?: string };
   if (!command || typeof command !== 'string' || !command.trim() || command.length > 500) {
     res.status(400).json({ error: 'command é obrigatório (string curta)' });
     return;
@@ -438,10 +477,17 @@ app.post('/api/workspace/exec', (req, res) => {
     res.status(403).json({ error: 'Comando bloqueado por segurança (destrutivo demais)' });
     return;
   }
+  const { root } = deliveryRoot(project);
+  try {
+    await mkdir(root, { recursive: true }); // cwd do exec precisa existir
+  } catch (error: any) {
+    res.status(500).json({ error: 'Falha ao criar a pasta do projeto', details: error.message });
+    return;
+  }
   exec(
     command,
     {
-      cwd: join(process.cwd(), 'workspace'),
+      cwd: root,
       shell: process.platform === 'win32' ? 'cmd.exe' : '/bin/sh',
       timeout: 90_000,
       maxBuffer: 512 * 1024,

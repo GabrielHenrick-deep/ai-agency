@@ -1,6 +1,6 @@
 /**
  * Modo EQUIPE 🤝: vários agentes trabalham JUNTOS na mesma tarefa,
- * entregando arquivos em workspace/ (mesmo formato do modo tarefa).
+ * entregando arquivos na pasta do projeto em Documentos (mesmo formato do modo tarefa).
  *
  * - SEQUENCIAL: cada agente vê o que os anteriores entregaram (arquivos +
  *   resumo + trechos) e constrói em cima (ex.: backend primeiro, frontend
@@ -10,6 +10,7 @@
  */
 
 import { Personality } from '../types';
+import { TaskFile } from './tasks';
 
 export interface Teammate {
   name: string;
@@ -21,6 +22,20 @@ export interface Delivery {
   files: string[];
   /** resumo do que a pessoa fez (sem os blocos de arquivo/comando) */
   summary: string;
+  /** trechos reais dos arquivos entregues (p/ o próximo da fila construir em cima) */
+  snippets: string;
+}
+
+/** Monta trechos curtos dos arquivos entregues (o próximo agente REUSA o código). */
+export function buildSnippets(files: TaskFile[], maxPerFile = 900, maxTotal = 3600): string {
+  let out = '';
+  for (const f of files) {
+    const cut = f.content.length > maxPerFile ? `${f.content.slice(0, maxPerFile)}\n…(cortado)` : f.content;
+    const block = `\n\`\`\`\n// ${f.path}\n${cut}\n\`\`\`\n`;
+    if (out.length + block.length > maxTotal) break;
+    out += block;
+  }
+  return out;
 }
 
 /**
@@ -52,25 +67,32 @@ export function buildWorkMessages(
       'o que você espera dos outros (ex.: "a API sobe em :3001 com rota GET /api/dados").'
     : '[MODO EQUIPE — SEQUENCIAL] Você está trabalhando EM EQUIPE nesta tarefa com: ' +
       `${team}. Você recebe o que os colegas JÁ ENTREGARAM antes de você: NÃO refaça o trabalho deles; ` +
-      'construa EM CIMA (reutilize rotas, nomes, formatos e portas). Entregue APENAS os arquivos da SUA especialidade.';
+      'construa EM CIMA (reutilize rotas, nomes, imports e formatos DOS ARQUIVOS abaixo). ' +
+      'Entregue APENAS os arquivos da SUA especialidade.';
 
   const system =
     `${persona.systemPrompt}\n\n` +
     `${teamRule}\n\n` +
-    'FORMATO DE ENTREGA (obrigatório): para cada arquivo, use exatamente:\n' +
+    'FORMATO DE ENTREGA (OBRIGATÓRIO — sem arquivo NÃO HÁ entrega): comece declarando a pasta do projeto em UMA linha:\n' +
+    '### projeto: nome-do-projeto\n' +
+    '(TODOS da equipe usam o MESMO nome; os arquivos vão para a pasta Documentos dessa pasta de projeto no computador do usuário.)\n' +
+    'Depois, para cada arquivo, use exatamente:\n' +
     '### arquivo: caminho/relativo/nome.ext\n```linguagem\n(conteúdo completo, sem resumir)\n```\n' +
     'e, se precisar instalar/rodar algo, comandos assim (um por linha):\n' +
     '### comando: npm install\n\n' +
     'Regras: caminhos relativos simples (sem ".."); código COMPLETO e pronto; no máximo 6 arquivos; ' +
-    'finalmente, escreva um resumo de 1 ou 2 linhas do que VOCÊ entregou (não o dos outros).';
+    'PROIBIDO só conversar, dar ideias ou dizer "podemos fazer X" — seu trabalho SÓ conta se vier EM ARQUIVOS. ' +
+    'No fim, resumo de 1 ou 2 linhas do que VOCÊ entregou (não o dos outros).';
 
   let user = `TAREFA DA EQUIPE: ${task}`;
 
   if (!parallel && prior.length > 0) {
-    user += '\n\n=== O QUE JÁ FOI ENTREGUE PELA EQUIPE ===\n';
+    user += '\n\n=== O QUE JÁ FOI ENTREGUE PELA EQUIPE (conteúdo real incluído) ===\n';
     for (const d of prior) {
       user += `\n— ${d.name}: ${d.files.length > 0 ? `${d.files.length} arquivo(s): ${d.files.join(', ')}` : 'sem arquivos'} — ${d.summary}\n`;
+      if (d.snippets) user += d.snippets;
     }
+    user += '\nCONSTRUA EM CIMA desses arquivos: importe, chame e reutilize o que já existe. NÃO recrie o que já está pronto.\n';
   }
 
   user += '\n\nSua parte agora (só a SUA especialidade):';

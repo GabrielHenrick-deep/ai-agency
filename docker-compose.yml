@@ -1,4 +1,27 @@
 services:
+  app:
+    build: .
+    container_name: ai-agent-app
+    restart: unless-stopped
+    ports:
+      - "3001:3001"
+    environment:
+      PORT: 3001
+      # banco dentro da mesma rede do compose
+      DATABASE_URL: postgres://postgres:postgres@db:5432/aiagent
+      # Ollama segue rodando no PC (host), fora do Docker
+      OLLAMA_URL: http://host.docker.internal:11434
+      OPENCODE_API_KEY: ${OPENCODE_API_KEY:-}
+    extra_hosts:
+      # garante host.docker.internal também em Docker nativo no Linux
+      - "host.docker.internal:host-gateway"
+    volumes:
+      # arquivos gerados pelos agentes no modo tarefa ficam acessíveis no host
+      - ./workspace:/app/workspace
+    depends_on:
+      db:
+        condition: service_healthy
+
   db:
     image: postgres:16-alpine
     container_name: ai-agent-postgres
@@ -11,6 +34,11 @@ services:
       - "5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d aiagent"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
 
 volumes:
   pgdata:

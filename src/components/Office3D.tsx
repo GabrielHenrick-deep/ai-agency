@@ -19,8 +19,8 @@ import { useMentions } from '../hooks/useMentions';
 import { MentionPopup } from './MentionPopup';
 import { Personality } from '../types';
 import { Visual, visualFor } from '../utils/visuals';
-import { extractCommands, extractFiles, runCommand, saveFilesToWorkspace, TASK_INSTRUCTION } from '../utils/tasks';
-import { buildWorkMessages, Delivery, stripDeliverables } from '../utils/team';
+import { extractCommands, extractFiles, extractProject, runCommand, saveProjectFiles, slugify, TASK_INSTRUCTION, TaskFile } from '../utils/tasks';
+import { buildSnippets, buildWorkMessages, Delivery, stripDeliverables } from '../utils/team';
 import './Office3D.css';
 
 /* ============================== visuais ============================== */
@@ -274,6 +274,8 @@ interface LegRefs {
 interface TermEntry {
   id: string;
   cmd: string;
+  /** pasta do projeto (Documentos\<projeto>) onde o comando roda */
+  project?: string;
   status: 'pending' | 'running' | 'done' | 'error';
   output?: string;
   code?: number;
@@ -450,19 +452,22 @@ function createHuman(v: Visual, opts?: { hat?: boolean }): Built {
     bang.rotation.z = rz;
     head.add(bang);
   });
-  // mechas laterais emoldurando o rosto
+  // laterais do cabelo: volume ATRÁS das orelhas — rosto 100% livre
   [-1, 1].forEach(side => {
-    const lock = mesh(new THREE.SphereGeometry(0.085, 12, 10), hairM, 0.42 * side, -0.04, 0.26);
-    lock.scale.set(0.55, 1.7, 0.6);
-    lock.rotation.z = 0.12 * side;
-    head.add(lock);
+    const sweep = mesh(new THREE.SphereGeometry(0.13, 12, 10), hairM, 0.44 * side, 0.05, -0.18);
+    sweep.scale.set(0.6, 1.2, 1.3);
+    head.add(sweep);
   });
   if (v.hairStyle === 'long') {
     const back = mesh(new THREE.SphereGeometry(0.27, 18, 16), hairM, 0, -0.22, -0.3);
     back.scale.set(1.15, 1.4, 0.72);
     head.add(back);
-    head.add(mesh(new THREE.SphereGeometry(0.085, 10, 10), hairM, -0.34, -0.3, -0.02));
-    head.add(mesh(new THREE.SphereGeometry(0.085, 10, 10), hairM, 0.34, -0.3, -0.02));
+    // mechas do comprimento caindo atrás dos ombros (longe do rosto)
+    [-1, 1].forEach(side => {
+      const strand = mesh(new THREE.SphereGeometry(0.09, 10, 10), hairM, 0.36 * side, -0.34, -0.2);
+      strand.scale.set(0.85, 1.6, 0.85);
+      head.add(strand);
+    });
   } else if (v.hairStyle === 'ponytail') {
     const tail = mesh(new THREE.SphereGeometry(0.095, 12, 12), hairM, 0, -0.1, -0.44);
     tail.scale.set(1, 1.7, 1);
@@ -1344,13 +1349,15 @@ export function Office3D() {
   const [teamMode, setTeamMode] = useState(false);
   const [teamIds, setTeamIds] = useState<string[] | null>(null); // null = toda a equipe
   const [teamParallel, setTeamParallel] = useState(false);       // false = sequencial
-  // modo tarefa 🛠️: o agente EXECUTA o pedido e entrega arquivos (salvos em workspace/)
+  // modo tarefa 🛠️: o agente EXECUTA o pedido e entrega arquivos (salvos em Documentos\nome-do-projeto)
   const [taskMode, setTaskMode] = useState(false);
   const [taskNote, setTaskNote] = useState<string | null>(null);
   // terminal: comandos sugeridos pelos agentes + saída da execução
   const [termOpen, setTermOpen] = useState(false);
   const [termLog, setTermLog] = useState<TermEntry[]>([]);
   const [fixing, setFixing] = useState(false); // devolveu o erro pro agente corrigir
+  // pasta do projeto da entrega atual (Documentos\<projeto>) — p/ o terminal e as correções
+  const projectRef = useRef<string | null>(null);
   const [meetingTurns, setMeetingTurns] = useState<{ agentId: string; name: string; text: string }[]>([]);
   const [meetingSpeaker, setMeetingSpeaker] = useState<string | null>(null);
   const [meetingRunning, setMeetingRunning] = useState(false);
@@ -2216,7 +2223,7 @@ export function Office3D() {
    * - SEQUENCIAL: cada um vê os arquivos/resumo de quem trabalhou antes
    *   (ex.: backend entrega a API → frontend consome na sequência).
    * - PARALELO: todos ao mesmo tempo, cada um na sua especialidade.
-   * Arquivos vão pra workspace/ e comandos pra fila do terminal (igual modo tarefa).
+   * Arquivos vão pra Documentos\<projeto> e comandos pra fila do terminal (igual modo tarefa).
    */
   const runTeamTask = useCallback(async (task: string) => {
     if (meetingRunning || busy) return;
@@ -2238,6 +2245,8 @@ export function Office3D() {
 
     const history: { agentId: string; name: string; text: string }[] = [];
     const deliveries: Delivery[] = [];
+    // pasta do projeto em Documentos: o primeiro a entregar "batiza"; todos entregam nela
+    let teamProject: string | null = null;
     // entregas completas (com trechos de conteúdo) p/ o próximo da fila ver
     const cloud = { zenApiKey: state.settings.zenApiKey, providers: state.settings.providers };
 
@@ -2250,36 +2259,61 @@ export function Office3D() {
       const tCtrl = new AbortController();
       turnAbortRef.current = tCtrl;
       teamCtrlsRef.current.push(tCtrl);
-      let text = '';
-      try {
-        text = await fetchTurn(
-          getModelFor(state.settings, a.id),
-          msgs,
-          { temperature: state.settings.temperature, num_predict: state.settings.maxTokens },
-          tCtrl.signal,
-          cloud
-        );
-      } catch {
-        if (ctrl.signal.aborted) return null;
-        text = '';
-      }
-      if (ctrl.signal.aborted) return null;
-      if (!text) text = '…(voltei vazio — aumenta o Max tokens em Ajustes e tenta de novo)…';
+      // entregar arquivos gasta tokens pra valer: piso pra não truncar o código no meio
+      const opts = {
+        temperature: state.settings.temperature,
+        num_predict: Math.max(state.settings.maxTokens, 8192),
+      };
 
-      // mesma canalização do modo tarefa: arquivos → workspace/, comandos → fila do terminal
-      const files = extractFiles(text);
-      const saved = files.length > 0 ? await saveFilesToWorkspace(files) : [];
+      let text = '';
+      let files: TaskFile[] = [];
+      // até 2 tentativas: se o agente não entregar NENHUM arquivo, cobra a entrega
+      for (let attempt = 0; attempt < 2; attempt++) {
+        try {
+          text = await fetchTurn(
+            getModelFor(state.settings, a.id),
+            msgs,
+            opts,
+            tCtrl.signal,
+            cloud
+          );
+        } catch {
+          if (ctrl.signal.aborted) return null;
+          text = '';
+        }
+        if (ctrl.signal.aborted) return null;
+        if (!text) break;
+        files = files.concat(extractFiles(text));
+        if (files.length > 0 || attempt === 1) break;
+        // nada entregue → cobra explicitamente a entrega EM ARQUIVOS
+        msgs.push({ role: 'assistant', content: text });
+        msgs.push({
+          role: 'user',
+          content:
+            'Você NÃO entregou nenhum arquivo — e sem arquivo não há entrega. ' +
+            'Entregue AGORA os arquivos da SUA parte, cada um no formato obrigatório:\n' +
+            '### arquivo: caminho/nome.ext\n```linguagem\n(conteúdo completo, sem resumir)\n```\n' +
+            'No máximo 6 arquivos, código completo e pronto. Só os arquivos e o resumo de 1 linha no fim.',
+        });
+      }
+      if (!text) text = '…(o modelo respondeu vazio — tenta de novo ou troca o modelo)…';
+
+      // mesma canalização do modo tarefa: arquivos → Documentos\<projeto>, comandos → fila do terminal
+      if (!teamProject) teamProject = extractProject(text) || slugify(task) || 'projeto';
+      projectRef.current = teamProject;
+      const delivered = files.length > 0 ? await saveProjectFiles(files, teamProject) : null;
+      const saved = delivered?.saved ?? [];
       const cmds = extractCommands(text);
       if (cmds.length > 0) {
         setTermLog(prev => [
           ...prev,
-          ...cmds.map((cmd, i) => ({ id: `team-${Date.now()}-${a.id}-${i}`, cmd, status: 'pending' as const })),
+          ...cmds.map((cmd, i) => ({ id: `team-${Date.now()}-${a.id}-${i}`, cmd, project: teamProject ?? undefined, status: 'pending' as const })),
         ]);
         setTermOpen(true);
       }
 
       const summary = stripDeliverables(text).slice(0, 600);
-      const delivery: Delivery = { name: a.name, files: saved, summary };
+      const delivery: Delivery = { name: a.name, files: saved, summary, snippets: buildSnippets(files) };
       const report =
         (saved.length > 0
           ? `📦 ${saved.length} arquivo(s): ${saved.slice(0, 5).join(', ')}${saved.length > 5 ? '…' : ''}`
@@ -2309,7 +2343,7 @@ export function Office3D() {
       if (!ctrl.signal.aborted) {
         const total = deliveries.reduce((n, d) => n + d.files.length, 0);
         setTaskNote(total > 0
-          ? `🤝 equipe entregou ${total} arquivo(s) em workspace/ — confira no terminal se há comandos pra rodar`
+          ? `🤝 equipe entregou ${total} arquivo(s) em Documentos\\${teamProject ?? 'projeto'} — confira no terminal se há comandos pra rodar`
           : '🤝 equipe concluiu (nenhum arquivo novo — os agentes podem ter só discutido)');
         if (history.length > 0) await saveMeeting(`🤝 ${task}`, history);
       }
@@ -2353,7 +2387,7 @@ export function Office3D() {
   /* ---------- terminal dos agentes ---------- */
   const runTermEntry = useCallback(async (entry: TermEntry) => {
     setTermLog(prev => prev.map(e => (e.id === entry.id ? { ...e, status: 'running', output: undefined } : e)));
-    const r = await runCommand(entry.cmd);
+    const r = await runCommand(entry.cmd, entry.project ?? projectRef.current ?? undefined);
     const ok = r.code === 0 && !r.timedOut;
     setTermLog(prev => prev.map(e => (e.id === entry.id ? {
       ...e,
@@ -2371,7 +2405,7 @@ export function Office3D() {
 
   /**
    * FEEDBACK LOOP: manda os comandos que FALHARAM (+ saída) de volta pro agente.
-   * Ele corrige os arquivos em workspace/ e devolve os comandos certos pra fila.
+   * Ele corrige os arquivos na pasta do projeto e devolve os comandos certos pra fila.
    */
   const askAgentToFix = useCallback(async () => {
     if (fixing || busy || !selected) return;
@@ -2386,16 +2420,20 @@ export function Office3D() {
         .map(e => `$ ${e.cmd}\n  código de saída: ${e.code}\n  saída:\n${(e.output ?? '').slice(0, 2000)}`)
         .join('\n\n');
       const reply = await streamMessage(
-        `FEEDBACK DO TERMINAL: os comandos que você sugeriu FALHARAM ao rodar em workspace/. ` +
+        `FEEDBACK DO TERMINAL: os comandos que você sugeriu FALHARAM ao rodar na pasta do projeto ` +
+        `(Documentos\\${projectRef.current ?? 'projeto'}). ` +
         `Corrija os arquivos (entregue de novo no formato de arquivo) e devolva os comandos certos:\n\n${report}`,
         TASK_INSTRUCTION
       );
       if (!reply) return;
+      // a correção vale pra pasta do projeto atual (a não ver que o agente redeclare outra)
+      const project = extractProject(reply) || projectRef.current || 'projeto';
+      projectRef.current = project;
       const files = extractFiles(reply);
       if (files.length > 0) {
-        const saved = await saveFilesToWorkspace(files);
-        if (saved.length > 0) {
-          setTaskNote(`🔧 correção aplicada: ${saved.length} arquivo(s) atualizados (${saved.slice(0, 3).join(', ')})`);
+        const delivered = await saveProjectFiles(files, project);
+        if (delivered && delivered.saved.length > 0) {
+          setTaskNote(`🔧 correção aplicada: ${delivered.saved.length} arquivo(s) atualizados em Documentos\\${delivered.project}`);
         }
       }
       const cmds = extractCommands(reply);
@@ -2403,7 +2441,7 @@ export function Office3D() {
         // falhas antigas ficam no histórico (✖) e os comandos corrigidos entram na fila
         setTermLog(prev => [
           ...prev,
-          ...cmds.map((cmd, i) => ({ id: `fix-${Date.now()}-${i}`, cmd, status: 'pending' as const })),
+          ...cmds.map((cmd, i) => ({ id: `fix-${Date.now()}-${i}`, cmd, project, status: 'pending' as const })),
         ]);
         setTermOpen(true);
       }
@@ -2432,15 +2470,18 @@ export function Office3D() {
     setTaskNote(null);
     try {
       const reply = await streamMessage(text, taskMode ? TASK_INSTRUCTION : undefined);
-      // modo tarefa: o agente devolve arquivos "### arquivo: ..." → salvos em workspace/
-      // e comandos "### comando: ..." → vão pra fila do terminal 🖥️
+      // modo tarefa: o agente devolve arquivos "### arquivo: ..." → salvos em Documentos\<projeto>
+      // e comandos "### comando: ..." → vão pra fila do terminal 🖥️ (rodam dentro da pasta do projeto)
       if (taskMode && reply) {
+        // pasta do projeto: a declarada pelo agente → a já usada na conversa → slug da tarefa
+        const project = extractProject(reply) || projectRef.current || slugify(text) || 'projeto';
+        projectRef.current = project;
         const files = extractFiles(reply);
         if (files.length > 0) {
-          const saved = await saveFilesToWorkspace(files);
+          const delivered = await saveProjectFiles(files, project);
           setTaskNote(
-            saved.length > 0
-              ? `💾 ${saved.length} arquivo(s) entregues em workspace/: ${saved.slice(0, 3).join(', ')}${saved.length > 3 ? '…' : ''}`
+            delivered && delivered.saved.length > 0
+              ? `💾 ${delivered.saved.length} arquivo(s) entregues em Documentos\\${delivered.project}: ${delivered.saved.slice(0, 3).join(', ')}${delivered.saved.length > 3 ? '…' : ''}`
               : '⚠️ o agente respondeu, mas não consegui salvar os arquivos (backend no ar?)'
           );
         }
@@ -2448,7 +2489,7 @@ export function Office3D() {
         if (cmds.length > 0) {
           setTermLog(prev => [
             ...prev,
-            ...cmds.map((cmd, i) => ({ id: `${Date.now()}-${i}`, cmd, status: 'pending' as const })),
+            ...cmds.map((cmd, i) => ({ id: `${Date.now()}-${i}`, cmd, project, status: 'pending' as const })),
           ]);
           setTermOpen(true);
         }
@@ -2746,7 +2787,7 @@ export function Office3D() {
                       <button
                         className="term-run"
                         onClick={() => runTermEntry(e)}
-                        title="Executar este comando em workspace/"
+                        title="Executar este comando na pasta do projeto (Documentos)"
                       >
                         ▶
                       </button>
@@ -2761,7 +2802,7 @@ export function Office3D() {
                 </div>
               ))}
             </div>
-            <div className="meeting-foot">comandos rodam dentro de workspace/ • timeout 90s</div>
+            <div className="meeting-foot">comandos rodam na pasta do projeto em Documentos • timeout 90s</div>
           </aside>
         )}
         <div className="office-hint">arraste p/ girar • scroll = zoom • clique no boneco p/ focar • 1–{agents.length} troca de agente</div>
@@ -2827,7 +2868,7 @@ export function Office3D() {
               setTaskMode(v => !v);
               if (!taskMode) { setMeetingMode(false); setTeamMode(false); }
             }}
-            title="Modo tarefa: o agente EXECUTA de verdade e entrega arquivos (salvos em workspace/)"
+            title="Modo tarefa: o agente EXECUTA de verdade e entrega arquivos (salvos em Documentos\nome-do-projeto)"
             aria-label="Alternar modo tarefa"
             aria-pressed={taskMode}
           >
@@ -2853,7 +2894,7 @@ export function Office3D() {
               setTeamMode(v => !v);
               if (!teamMode) { setMeetingMode(false); setTaskMode(false); }
             }}
-            title="Modo equipe: os agentes TRABALHAM JUNTOS numa tarefa (ex.: um no backend, outro no frontend)"
+              title="Modo equipe: os agentes TRABALHAM JUNTOS e entregam arquivos em Documentos\nome-do-projeto (ex.: um no backend, outro no frontend)"
             aria-label="Alternar modo equipe"
             aria-pressed={teamMode}
           >

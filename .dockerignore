@@ -1,0 +1,21 @@
+# dependências/build locais (regenerados dentro da imagem)
+node_modules
+dist
+
+# git e arquivos de ambiente
+.git
+.gitignore
+.env
+*.local
+
+# arquivos gerados em runtime pelos agentes (montado como volume)
+workspace
+
+# logs e experimentos fora do projeto
+*.log
+*.err
+kimi-k3.html
+
+# editores
+.vscode
+.idea
